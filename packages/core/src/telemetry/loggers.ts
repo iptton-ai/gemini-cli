@@ -46,6 +46,9 @@ export function logCliConfiguration(
   config: Config,
   event: StartSessionEvent,
 ): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logStartSessionEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -75,6 +78,9 @@ export function logCliConfiguration(
 }
 
 export function logUserPrompt(config: Config, event: UserPromptEvent): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logNewPromptEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -98,6 +104,9 @@ export function logUserPrompt(config: Config, event: UserPromptEvent): void {
 }
 
 export function logToolCall(config: Config, event: ToolCallEvent): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logToolCallEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -131,6 +140,9 @@ export function logToolCall(config: Config, event: ToolCallEvent): void {
 }
 
 export function logApiRequest(config: Config, event: ApiRequestEvent): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logApiRequestEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -150,6 +162,9 @@ export function logApiRequest(config: Config, event: ApiRequestEvent): void {
 }
 
 export function logApiError(config: Config, event: ApiErrorEvent): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logApiErrorEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -186,6 +201,9 @@ export function logApiError(config: Config, event: ApiErrorEvent): void {
 }
 
 export function logApiResponse(config: Config, event: ApiResponseEvent): void {
+  // Skip telemetry for DeepSeek provider
+  if (config.getProvider() === 'deepseek') return;
+
   ClearcutLogger.getInstance(config)?.logApiResponseEvent(event);
   if (!isTelemetrySdkInitialized()) return;
   const attributes: LogAttributes = {

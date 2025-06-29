@@ -115,7 +115,7 @@ export class WebSearchTool extends BaseTool<
     const geminiClient = this.config.getGeminiClient();
 
     try {
-      const response = await geminiClient.generateContent(
+      const response = await geminiClient.generateContentFromContent(
         [{ role: 'user', parts: [{ text: params.query }] }],
         { tools: [{ googleSearch: {} }] },
         signal,

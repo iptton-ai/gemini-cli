@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AuthType } from '../core/contentGenerator.js';
+import { AuthType } from '../config/auth.js';
 
 export interface RetryOptions {
   maxAttempts: number;

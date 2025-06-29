@@ -119,6 +119,7 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
   const [footerHeight, setFooterHeight] = useState<number>(0);
   const [corgiMode, setCorgiMode] = useState(false);
   const [currentModel, setCurrentModel] = useState(config.getModel());
+  const [configVersion, setConfigVersion] = useState(0);
   const [shellModeActive, setShellModeActive] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState<boolean>(false);
   const [showToolDescriptions, setShowToolDescriptions] =
@@ -149,6 +150,19 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
     handleThemeHighlight,
   } = useThemeCommand(settings, setThemeError, addItem);
 
+  const onAuthComplete = useCallback(async () => {
+    // Force re-render to pick up new provider/model
+    setConfigVersion(prev => prev + 1);
+    setCurrentModel(config.getModel());
+
+    // Reset chat history when switching providers
+    try {
+      await config.getGeminiClient()?.resetChat();
+    } catch (error) {
+      console.warn('Failed to reset chat after auth change:', error);
+    }
+  }, [config]);
+
   const {
     isAuthDialogOpen,
     openAuthDialog,
@@ -156,7 +170,7 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
     handleAuthHighlight,
     isAuthenticating,
     cancelAuthentication,
-  } = useAuthCommand(settings, setAuthError, config);
+  } = useAuthCommand(settings, setAuthError, config, onAuthComplete);
 
   useEffect(() => {
     if (settings.merged.selectedAuthType) {
@@ -583,7 +597,11 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
           key={staticKey}
           items={[
             <Box flexDirection="column" key="header">
-              <Header terminalWidth={terminalWidth} />
+              <Header
+                key={`header-${configVersion}`}
+                terminalWidth={terminalWidth}
+                provider={config.getProvider()}
+              />
               <Tips config={config} />
               {updateMessage && <UpdateNotification message={updateMessage} />}
             </Box>,
@@ -812,6 +830,7 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
             </Box>
           )}
           <Footer
+            key={`footer-${configVersion}`}
             model={currentModel}
             targetDir={config.getTargetDir()}
             debugMode={config.getDebugMode()}
@@ -827,7 +846,8 @@ const App = ({ config, settings, startupWarnings = [] }: AppProps) => {
             candidatesTokenCount={
               sessionStats.currentResponse.candidatesTokenCount
             }
-            totalTokenCount={sessionStats.currentResponse.totalTokenCount}
+            totalTokenCount={sessionStats.cumulative.totalTokenCount}
+            provider={config.getProvider()}
           />
         </Box>
       </Box>

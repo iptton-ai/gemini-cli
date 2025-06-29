@@ -9,45 +9,36 @@ import {
   GenerateContentConfig,
   Part,
   SchemaUnion,
-  PartListUnion,
   Content,
   Tool,
   GenerateContentResponse,
 } from '@google/genai';
 import { getFolderStructure } from '../utils/getFolderStructure.js';
-import {
-  Turn,
-  ServerGeminiStreamEvent,
-  GeminiEventType,
-  ChatCompressionInfo,
-} from './turn.js';
+import { Turn, ChatCompressionInfo } from './turn.js';
 import { Config } from '../config/config.js';
 import { getCoreSystemPrompt } from './prompts.js';
 import { ReadManyFilesTool } from '../tools/read-many-files.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
-import { checkNextSpeaker } from '../utils/nextSpeakerChecker.js';
 import { reportError } from '../utils/errorReporting.js';
 import { GeminiChat } from './geminiChat.js';
 import { retryWithBackoff } from '../utils/retry.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { tokenLimit } from './tokenLimits.js';
-import {
-  AuthType,
-  ContentGenerator,
-  ContentGeneratorConfig,
-  createContentGenerator,
-} from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
+import { LLMProvider } from './llm.js';
+import { GoogleGenAI } from '@google/genai';
+import { ContentGenerator } from './contentGenerator.js';
+import { AuthType } from '../config/auth.js';
+import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 
 function isThinkingSupported(model: string) {
   if (model.startsWith('gemini-2.5')) return true;
   return false;
 }
 
-export class GeminiClient {
+export class GeminiClient implements LLMProvider {
   private chat?: GeminiChat;
-  private contentGenerator?: ContentGenerator;
   private model: string;
   private embeddingModel: string;
   private generateContentConfig: GenerateContentConfig = {
@@ -55,6 +46,8 @@ export class GeminiClient {
     topP: 1,
   };
   private readonly MAX_TURNS = 100;
+  private googleGenAI: GoogleGenAI;
+  private contentGenerator?: ContentGenerator;
 
   constructor(private config: Config) {
     if (config.getProxy()) {
@@ -63,20 +56,26 @@ export class GeminiClient {
 
     this.model = config.getModel();
     this.embeddingModel = config.getEmbeddingModel();
+    this.googleGenAI = new GoogleGenAI({
+      apiKey: config.getProviders()?.google?.apiKey || '',
+    });
   }
 
-  async initialize(contentGeneratorConfig: ContentGeneratorConfig) {
-    this.contentGenerator = await createContentGenerator(
-      contentGeneratorConfig,
-    );
-    this.chat = await this.startChat();
-  }
-
-  getContentGenerator(): ContentGenerator {
-    if (!this.contentGenerator) {
-      throw new Error('Content generator not initialized');
+  async initialize(contentConfig?: any) {
+    // Create appropriate content generator based on auth type
+    const authType = this.config.getContentGeneratorConfig()?.authType;
+    if (authType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
+      // For OAuth, use Code Assist
+      this.contentGenerator = await createCodeAssistContentGenerator(
+        {}, // HttpOptions - proxy is handled at the global level
+        authType
+      );
+    } else {
+      // For API key and other auth types, use direct Gemini API
+      this.contentGenerator = this.googleGenAI.models;
     }
-    return this.contentGenerator;
+
+    this.chat = await this.startChat();
   }
 
   async addHistory(content: Content) {
@@ -101,6 +100,11 @@ export class GeminiClient {
   async resetChat(): Promise<void> {
     this.chat = await this.startChat();
     await this.chat;
+  }
+
+  getContentGenerator(): ContentGenerator {
+    // Return the appropriate content generator based on auth type
+    return this.contentGenerator || this.googleGenAI.models;
   }
 
   private async getEnvironment(): Promise<Part[]> {
@@ -215,40 +219,6 @@ export class GeminiClient {
     }
   }
 
-  async *sendMessageStream(
-    request: PartListUnion,
-    signal: AbortSignal,
-    turns: number = this.MAX_TURNS,
-  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
-    if (!turns) {
-      return new Turn(this.getChat());
-    }
-
-    const compressed = await this.tryCompressChat();
-    if (compressed) {
-      yield { type: GeminiEventType.ChatCompressed, value: compressed };
-    }
-    const turn = new Turn(this.getChat());
-    const resultStream = turn.run(request, signal);
-    for await (const event of resultStream) {
-      yield event;
-    }
-    if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
-      const nextSpeakerCheck = await checkNextSpeaker(
-        this.getChat(),
-        this,
-        signal,
-      );
-      if (nextSpeakerCheck?.next_speaker === 'model') {
-        const nextRequest = [{ text: 'Please continue.' }];
-        // This recursive call's events will be yielded out, but the final
-        // turn object will be from the top-level call.
-        yield* this.sendMessageStream(nextRequest, signal, turns - 1);
-      }
-    }
-    return turn;
-  }
-
   async generateJson(
     contents: Content[],
     schema: SchemaUnion,
@@ -266,7 +236,7 @@ export class GeminiClient {
       };
 
       const apiCall = () =>
-        this.getContentGenerator().generateContent({
+        this.googleGenAI.models.generateContent({
           model,
           config: {
             ...requestConfig,
@@ -283,7 +253,7 @@ export class GeminiClient {
         authType: this.config.getContentGeneratorConfig()?.authType,
       });
 
-      const text = getResponseText(result);
+      const text = getResponseText(result as GenerateContentResponse);
       if (!text) {
         const error = new Error(
           'API returned an empty response for generateJson.',
@@ -337,7 +307,21 @@ export class GeminiClient {
     }
   }
 
-  async generateContent(
+  async generateContent(history: Turn[]): Promise<GenerateContentResponse> {
+    // For now, create a simple content array from the Turn history
+    // This is a simplified implementation that needs to be improved
+    const contents = history.map((turn, index) => ({
+      role: index % 2 === 0 ? 'user' : 'model',
+      parts: [{ text: `Turn ${index + 1}` }],
+    }));
+    return this.generateContentFromContent(
+      contents,
+      {},
+      new AbortController().signal,
+    );
+  }
+
+  async generateContentFromContent(
     contents: Content[],
     generationConfig: GenerateContentConfig,
     abortSignal: AbortSignal,
@@ -359,7 +343,7 @@ export class GeminiClient {
       };
 
       const apiCall = () =>
-        this.getContentGenerator().generateContent({
+        this.googleGenAI.models.generateContent({
           model: modelToUse,
           config: requestConfig,
           contents,
@@ -370,7 +354,7 @@ export class GeminiClient {
           await this.handleFlashFallback(authType),
         authType: this.config.getContentGeneratorConfig()?.authType,
       });
-      return result;
+      return result as GenerateContentResponse;
     } catch (error: unknown) {
       if (abortSignal.aborted) {
         throw error;
@@ -400,8 +384,10 @@ export class GeminiClient {
       contents: texts,
     };
 
-    const embedContentResponse =
-      await this.getContentGenerator().embedContent(embedModelParams);
+    const embedContentResponse = await this.googleGenAI.models.embedContent({
+      ...embedModelParams,
+      model: this.embeddingModel,
+    });
     if (
       !embedContentResponse.embeddings ||
       embedContentResponse.embeddings.length === 0
@@ -415,7 +401,7 @@ export class GeminiClient {
       );
     }
 
-    return embedContentResponse.embeddings.map((embedding, index) => {
+    return embedContentResponse.embeddings.map((embedding: any, index: number) => {
       const values = embedding.values;
       if (!values || values.length === 0) {
         throw new Error(
@@ -436,11 +422,10 @@ export class GeminiClient {
       return null;
     }
 
-    const { totalTokens: originalTokenCount } =
-      await this.getContentGenerator().countTokens({
-        model: this.model,
-        contents: history,
-      });
+    const { totalTokens: originalTokenCount } = await this.googleGenAI.models.countTokens({
+      model: this.model,
+      contents: history,
+    });
 
     // If not forced, check if we should compress based on context size.
     if (!force) {

@@ -369,8 +369,8 @@ export const useGeminiStream = (
           const updatedTools = pendingHistoryItemRef.current.tools.map(
             (tool) =>
               tool.status === ToolCallStatus.Pending ||
-              tool.status === ToolCallStatus.Confirming ||
-              tool.status === ToolCallStatus.Executing
+                tool.status === ToolCallStatus.Confirming ||
+                tool.status === ToolCallStatus.Executing
                 ? { ...tool, status: ToolCallStatus.Canceled }
                 : tool,
           );
@@ -405,6 +405,7 @@ export const useGeminiStream = (
           text: parseAndFormatApiError(
             eventValue.error,
             config.getContentGeneratorConfig().authType,
+            config.getModel(),
           ),
         },
         userMessageTimestamp,
@@ -524,7 +525,39 @@ export const useGeminiStream = (
       setInitError(null);
 
       try {
-        const stream = geminiClient.sendMessageStream(queryToSend, abortSignal);
+        // Get the chat instance and send message stream
+        const chat = geminiClient.getChat();
+        const streamResponse = await chat.sendMessageStream({
+          message: queryToSend,
+          config: { abortSignal },
+        });
+
+        // Convert the stream to the expected format
+        const stream = (async function* () {
+          for await (const response of streamResponse) {
+            // Get text from response parts
+            const text = response.candidates?.[0]?.content?.parts
+              ?.map(part => part.text)
+              .filter(Boolean)
+              .join('') || '';
+
+            if (text) {
+              yield {
+                type: ServerGeminiEventType.Content,
+                value: text,
+              } as GeminiEvent;
+            }
+
+            // Handle usage metadata
+            if (response.usageMetadata) {
+              yield {
+                type: ServerGeminiEventType.UsageMetadata,
+                value: response.usageMetadata,
+              } as GeminiEvent;
+            }
+          }
+        })();
+
         const processingStatus = await processGeminiStreamEvents(
           stream,
           userMessageTimestamp,
@@ -549,6 +582,7 @@ export const useGeminiStream = (
               text: parseAndFormatApiError(
                 getErrorMessage(error) || 'Unknown error',
                 config.getContentGeneratorConfig().authType,
+                config.getModel(),
               ),
             },
             userMessageTimestamp,

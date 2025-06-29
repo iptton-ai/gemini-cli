@@ -12,6 +12,26 @@ import { ConsoleSummaryDisplay } from './ConsoleSummaryDisplay.js';
 import process from 'node:process';
 import { MemoryUsageDisplay } from './MemoryUsageDisplay.js';
 
+/**
+ * Format model name for display in the footer
+ */
+function formatModelName(model: string, provider: 'google' | 'deepseek'): string {
+  // For DeepSeek provider, always show DeepSeek Chat regardless of the actual model
+  if (provider === 'deepseek') {
+    switch (model) {
+      case 'deepseek-chat':
+        return 'DeepSeek Chat';
+      case 'deepseek-reasoner':
+        return 'DeepSeek Reasoner';
+      default:
+        return 'DeepSeek Chat'; // Default to DeepSeek Chat for DeepSeek provider
+    }
+  }
+
+  // For Google provider, return the model as-is
+  return model;
+}
+
 interface FooterProps {
   model: string;
   targetDir: string;
@@ -25,6 +45,7 @@ interface FooterProps {
   promptTokenCount: number;
   candidatesTokenCount: number;
   totalTokenCount: number;
+  provider?: 'google' | 'deepseek';
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -38,9 +59,28 @@ export const Footer: React.FC<FooterProps> = ({
   showErrorDetails,
   showMemoryUsage,
   totalTokenCount,
+  provider = 'google',
 }) => {
   const limit = tokenLimit(model);
-  const percentage = totalTokenCount / limit;
+
+  // Ensure totalTokenCount is valid and not negative
+  const validTokenCount = Math.max(0, totalTokenCount || 0);
+
+  // Calculate percentage, but cap it at 1.0 (100%) to avoid negative context left
+  const percentage = Math.min(1.0, validTokenCount / limit);
+
+  // Debug logging for DeepSeek context calculation
+  if (provider === 'deepseek' && debugMode) {
+    console.log('DeepSeek Context Debug:', {
+      model,
+      provider,
+      totalTokenCount,
+      validTokenCount,
+      limit,
+      percentage,
+      contextLeft: ((1 - percentage) * 100).toFixed(0) + '%'
+    });
+  }
 
   return (
     <Box marginTop={1} justifyContent="space-between" width="100%">
@@ -79,11 +119,11 @@ export const Footer: React.FC<FooterProps> = ({
         )}
       </Box>
 
-      {/* Right Section: Gemini Label and Console Summary */}
+      {/* Right Section: Model Label and Console Summary */}
       <Box alignItems="center">
         <Text color={Colors.AccentBlue}>
           {' '}
-          {model}{' '}
+          {formatModelName(model, provider)}{' '}
           <Text color={Colors.Gray}>
             ({((1 - percentage) * 100).toFixed(0)}% context left)
           </Text>

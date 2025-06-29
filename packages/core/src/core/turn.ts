@@ -42,6 +42,7 @@ export interface ServerTool {
 
 export enum GeminiEventType {
   Content = 'content',
+  ToolCall = 'tool_call',
   ToolCallRequest = 'tool_call_request',
   ToolCallResponse = 'tool_call_response',
   ToolCallConfirmation = 'tool_call_confirmation',
@@ -289,5 +290,12 @@ export class Turn {
 
   getUsageMetadata(): GenerateContentResponseUsageMetadata | null {
     return this.lastUsageMetadata;
+  }
+
+  addResponse(response: GenerateContentResponse): void {
+    this.debugResponses.push(response);
+    if (response.usageMetadata) {
+      this.lastUsageMetadata = response.usageMetadata as GenerateContentResponseUsageMetadata;
+    }
   }
 }

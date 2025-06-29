@@ -7,13 +7,14 @@
 import {
   AuthType,
   CompletedToolCall,
-  ContentGeneratorConfig,
+  createContentGeneratorConfig,
   EditTool,
   ErroredToolCall,
   GeminiClient,
   ToolConfirmationOutcome,
   ToolRegistry,
 } from '../index.js';
+import { ContentGeneratorConfig } from '../config/auth.js';
 import { logs } from '@opentelemetry/api-logs';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import { Config } from '../config/config.js';

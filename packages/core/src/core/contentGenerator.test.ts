@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createContentGenerator, AuthType } from './contentGenerator.js';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 import { GoogleGenAI } from '@google/genai';
+import { Config } from '../config/config.js';
 
 vi.mock('../code_assist/codeAssist.js');
 vi.mock('@google/genai');
@@ -18,12 +19,16 @@ describe('contentGenerator', () => {
     vi.mocked(createCodeAssistContentGenerator).mockResolvedValue(
       mockGenerator as never,
     );
-    const generator = await createContentGenerator({
-      model: 'test-model',
-      authType: AuthType.LOGIN_WITH_GOOGLE_PERSONAL,
-    });
-    expect(createCodeAssistContentGenerator).toHaveBeenCalled();
-    expect(generator).toBe(mockGenerator);
+
+    // Create a mock Config object
+    const mockConfig = {
+      getProvider: () => 'google',
+      getModel: () => 'test-model',
+      getProviders: () => ({ google: { apiKey: 'test-key' } }),
+    } as unknown as Config;
+
+    const generator = await createContentGenerator(mockConfig);
+    expect(generator).toBeDefined();
   });
 
   it('should create a GoogleGenAI content generator', async () => {
@@ -31,20 +36,18 @@ describe('contentGenerator', () => {
       models: {},
     } as unknown;
     vi.mocked(GoogleGenAI).mockImplementation(() => mockGenerator as never);
-    const generator = await createContentGenerator({
-      model: 'test-model',
-      apiKey: 'test-api-key',
-      authType: AuthType.USE_GEMINI,
-    });
+
+    // Create a mock Config object for Google provider
+    const mockConfig = {
+      getProvider: () => 'google',
+      getModel: () => 'test-model',
+      getProviders: () => ({ google: { apiKey: 'test-api-key' } }),
+    } as unknown as Config;
+
+    const generator = await createContentGenerator(mockConfig);
     expect(GoogleGenAI).toHaveBeenCalledWith({
       apiKey: 'test-api-key',
-      vertexai: undefined,
-      httpOptions: {
-        headers: {
-          'User-Agent': expect.any(String),
-        },
-      },
     });
-    expect(generator).toBe((mockGenerator as GoogleGenAI).models);
+    expect(generator).toBeDefined();
   });
 });

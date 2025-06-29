@@ -21,6 +21,14 @@ describe('parseAndFormatApiError', () => {
     expect(parseAndFormatApiError(errorMessage)).toBe(expected);
   });
 
+  it('should format a valid API error JSON with model', () => {
+    const errorMessage =
+      'got status: 400 Bad Request. {"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}';
+    const expected =
+      '[API Error (Model: gemini-1.5-pro): API key not valid. Please pass a valid API key. (Status: INVALID_ARGUMENT)]';
+    expect(parseAndFormatApiError(errorMessage, undefined, 'gemini-1.5-pro')).toBe(expected);
+  });
+
   it('should format a 429 API error with the default message', () => {
     const errorMessage =
       'got status: 429 Too Many Requests. {"error":{"code":429,"message":"Rate limit exceeded","status":"RESOURCE_EXHAUSTED"}}';
@@ -52,6 +60,13 @@ describe('parseAndFormatApiError', () => {
     const errorMessage = 'This is a plain old error message';
     expect(parseAndFormatApiError(errorMessage)).toBe(
       `[API Error: ${errorMessage}]`,
+    );
+  });
+
+  it('should return the original message with model if it is not a JSON error', () => {
+    const errorMessage = 'This is a plain old error message';
+    expect(parseAndFormatApiError(errorMessage, undefined, 'deepseek-chat')).toBe(
+      `[API Error (Model: deepseek-chat): ${errorMessage}]`,
     );
   });
 
@@ -99,6 +114,15 @@ describe('parseAndFormatApiError', () => {
     };
     const expected = '[API Error: A structured error occurred]';
     expect(parseAndFormatApiError(error)).toBe(expected);
+  });
+
+  it('should format a StructuredError with model', () => {
+    const error: StructuredError = {
+      message: 'A structured error occurred',
+      status: 500,
+    };
+    const expected = '[API Error (Model: deepseek-chat): A structured error occurred]';
+    expect(parseAndFormatApiError(error, undefined, 'deepseek-chat')).toBe(expected);
   });
 
   it('should format a 429 StructuredError with the vertex message', () => {

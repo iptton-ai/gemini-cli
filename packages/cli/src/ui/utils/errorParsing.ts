@@ -56,12 +56,18 @@ function getRateLimitMessage(authType?: AuthType): string {
   }
 }
 
+function formatApiErrorMessage(message: string, model?: string): string {
+  const modelInfo = model ? ` (Model: ${model})` : '';
+  return `[API Error${modelInfo}: ${message}]`;
+}
+
 export function parseAndFormatApiError(
   error: unknown,
   authType?: AuthType,
+  model?: string,
 ): string {
   if (isStructuredError(error)) {
-    let text = `[API Error: ${error.message}]`;
+    let text = formatApiErrorMessage(error.message, model);
     if (error.status === 429) {
       text += getRateLimitMessage(authType);
     }
@@ -72,7 +78,7 @@ export function parseAndFormatApiError(
   if (typeof error === 'string') {
     const jsonStart = error.indexOf('{');
     if (jsonStart === -1) {
-      return `[API Error: ${error}]`; // Not a JSON error, return as is.
+      return formatApiErrorMessage(error, model); // Not a JSON error, return as is.
     }
 
     const jsonString = error.substring(jsonStart);
@@ -90,7 +96,8 @@ export function parseAndFormatApiError(
         } catch (_e) {
           // It's not a nested JSON error, so we just use the message as is.
         }
-        let text = `[API Error: ${finalMessage} (Status: ${parsedError.error.status})]`;
+        const modelInfo = model ? ` (Model: ${model})` : '';
+        let text = `[API Error${modelInfo}: ${finalMessage} (Status: ${parsedError.error.status})]`;
         if (parsedError.error.code === 429) {
           text += getRateLimitMessage(authType);
         }
@@ -99,8 +106,8 @@ export function parseAndFormatApiError(
     } catch (_e) {
       // Not a valid JSON, fall through and return the original message.
     }
-    return `[API Error: ${error}]`;
+    return formatApiErrorMessage(String(error), model);
   }
 
-  return '[API Error: An unknown error occurred.]';
+  return formatApiErrorMessage('An unknown error occurred.', model);
 }

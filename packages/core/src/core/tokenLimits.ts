@@ -25,6 +25,10 @@ export function tokenLimit(model: Model): TokenCount {
       return 1_048_576;
     case 'gemini-2.0-flash-preview-image-generation':
       return 32_000;
+    // DeepSeek models - context length is 128K tokens
+    case 'deepseek-chat':
+    case 'deepseek-reasoner':
+      return 131_072; // 128K tokens
     default:
       return DEFAULT_TOKEN_LIMIT;
   }

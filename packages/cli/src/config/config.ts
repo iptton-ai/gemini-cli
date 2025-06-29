@@ -197,6 +197,41 @@ export async function loadCliConfig(
 
   const sandboxConfig = await loadSandboxConfig(settings, argv);
 
+  // Build providers configuration from environment variables and settings
+  const providers = {
+    ...settings.providers,
+    google: {
+      ...settings.providers?.google,
+      apiKey: settings.providers?.google?.apiKey || process.env.GEMINI_API_KEY,
+    },
+    deepseek: {
+      ...settings.providers?.deepseek,
+      apiKey: settings.providers?.deepseek?.apiKey || process.env.DEEPSEEK_API_KEY,
+    },
+  };
+
+  // Determine provider based on selected auth type or settings
+  let provider: 'google' | 'deepseek' = settings.provider || 'google';
+
+  // Debug information
+  console.log('Config Debug Info:');
+  console.log('- settings.selectedAuthType:', settings.selectedAuthType);
+  console.log('- settings.provider:', settings.provider);
+  console.log('- settings.providers:', JSON.stringify(settings.providers, null, 2));
+  console.log('- Environment DEEPSEEK_API_KEY:', process.env.DEEPSEEK_API_KEY ? 'SET' : 'NOT SET');
+
+  if (settings.selectedAuthType === 'deepseek') {
+    provider = 'deepseek';
+    console.log('- Using DEEPSEEK provider based on selectedAuthType');
+  } else if (settings.selectedAuthType === 'api-key' || settings.selectedAuthType === 'oauth-personal' || settings.selectedAuthType === 'vertex-ai') {
+    provider = 'google';
+    console.log('- Using Google provider based on selectedAuthType');
+  } else {
+    console.log('- Using default provider:', provider);
+  }
+
+  console.log('- Final provider:', provider);
+
   return new Config({
     sessionId,
     embeddingModel: DEFAULT_GEMINI_EMBEDDING_MODEL,
@@ -245,6 +280,8 @@ export async function loadCliConfig(
     bugCommand: settings.bugCommand,
     model: argv.model!,
     extensionContextFilePaths,
+    provider,
+    providers,
   });
 }
 
@@ -297,6 +334,6 @@ function findEnvFile(startDir: string): string | null {
 export function loadEnvironment(): void {
   const envFilePath = findEnvFile(process.cwd());
   if (envFilePath) {
-    dotenv.config({ path: envFilePath, quiet: true });
+    dotenv.config({ path: envFilePath });
   }
 }

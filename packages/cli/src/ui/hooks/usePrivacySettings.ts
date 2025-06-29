@@ -85,10 +85,10 @@ function getCodeAssistServer(config: Config): CodeAssistServer {
   // Neither of these cases should ever happen.
   if (!(server instanceof CodeAssistServer)) {
     throw new Error('Oauth not being used');
-  } else if (!server.projectId) {
+  } else if (!(server as CodeAssistServer).projectId) {
     throw new Error('Oauth not being used');
   }
-  return server;
+  return server as CodeAssistServer;
 }
 
 async function getTier(server: CodeAssistServer): Promise<UserTierId> {

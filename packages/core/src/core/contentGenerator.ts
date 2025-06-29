@@ -5,127 +5,129 @@
  */
 
 import {
-  CountTokensResponse,
-  GenerateContentResponse,
   GenerateContentParameters,
+  GenerateContentResponse,
   CountTokensParameters,
-  EmbedContentResponse,
+  CountTokensResponse,
   EmbedContentParameters,
-  GoogleGenAI,
+  EmbedContentResponse,
 } from '@google/genai';
-import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
-import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
-import { getEffectiveModel } from './modelCheck.js';
+import { Config } from '../config/config.js';
+import { DeepSeekClient } from './deepseek.js';
+import { GeminiClient } from './client.js';
+import { LLMProvider } from './llm.js';
+import { Turn } from './turn.js';
+import { AuthType, ContentGeneratorConfig } from '../config/auth.js';
+
+// Re-export AuthType for convenience
+export { AuthType };
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
+ * This interface is compatible with @google/genai Models interface.
  */
 export interface ContentGenerator {
   generateContent(
-    request: GenerateContentParameters,
+    req: GenerateContentParameters,
   ): Promise<GenerateContentResponse>;
-
   generateContentStream(
-    request: GenerateContentParameters,
+    req: GenerateContentParameters,
   ): Promise<AsyncGenerator<GenerateContentResponse>>;
-
-  countTokens(request: CountTokensParameters): Promise<CountTokensResponse>;
-
-  embedContent(request: EmbedContentParameters): Promise<EmbedContentResponse>;
+  countTokens(req: CountTokensParameters): Promise<CountTokensResponse>;
+  embedContent(req: EmbedContentParameters): Promise<EmbedContentResponse>;
 }
-
-export enum AuthType {
-  LOGIN_WITH_GOOGLE_PERSONAL = 'oauth-personal',
-  USE_GEMINI = 'gemini-api-key',
-  USE_VERTEX_AI = 'vertex-ai',
-}
-
-export type ContentGeneratorConfig = {
-  model: string;
-  apiKey?: string;
-  vertexai?: boolean;
-  authType?: AuthType | undefined;
-};
 
 export async function createContentGeneratorConfig(
-  model: string | undefined,
-  authType: AuthType | undefined,
-  config?: { getModel?: () => string },
+  model: string,
+  authType: AuthType,
+  config: Config,
 ): Promise<ContentGeneratorConfig> {
-  const geminiApiKey = process.env.GEMINI_API_KEY;
-  const googleApiKey = process.env.GOOGLE_API_KEY;
-  const googleCloudProject = process.env.GOOGLE_CLOUD_PROJECT;
-  const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION;
-
-  // Use runtime model from config if available, otherwise fallback to parameter or default
-  const effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
-
-  const contentGeneratorConfig: ContentGeneratorConfig = {
-    model: effectiveModel,
+  return {
+    model,
     authType,
   };
-
-  // if we are using google auth nothing else to validate for now
-  if (authType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
-    return contentGeneratorConfig;
-  }
-
-  if (authType === AuthType.USE_GEMINI && geminiApiKey) {
-    contentGeneratorConfig.apiKey = geminiApiKey;
-    contentGeneratorConfig.model = await getEffectiveModel(
-      contentGeneratorConfig.apiKey,
-      contentGeneratorConfig.model,
-    );
-
-    return contentGeneratorConfig;
-  }
-
-  if (
-    authType === AuthType.USE_VERTEX_AI &&
-    !!googleApiKey &&
-    googleCloudProject &&
-    googleCloudLocation
-  ) {
-    contentGeneratorConfig.apiKey = googleApiKey;
-    contentGeneratorConfig.vertexai = true;
-    contentGeneratorConfig.model = await getEffectiveModel(
-      contentGeneratorConfig.apiKey,
-      contentGeneratorConfig.model,
-    );
-
-    return contentGeneratorConfig;
-  }
-
-  return contentGeneratorConfig;
 }
 
+/**
+ * Adapter class to make LLMProvider compatible with ContentGenerator interface
+ */
+class LLMProviderAdapter implements ContentGenerator {
+  constructor(private llmProvider: LLMProvider) {}
+
+  async generateContent(
+    req: GenerateContentParameters,
+  ): Promise<GenerateContentResponse> {
+    // For DeepSeek, we need to call a different method that handles system prompts
+    if ('generateContentWithSystemPrompt' in this.llmProvider) {
+      return (this.llmProvider as any).generateContentWithSystemPrompt(req);
+    }
+
+    // Fallback for other providers - convert GenerateContentParameters to Turn[] format
+    // This is a simplified conversion - in a real implementation,
+    // we would need proper Turn objects
+    const turns: Turn[] = [];
+    return this.llmProvider.generateContent(turns);
+  }
+
+  async generateContentStream(
+    req: GenerateContentParameters,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    // For DeepSeek, we need to call the same method that handles system prompts
+    if ('generateContentWithSystemPrompt' in this.llmProvider) {
+      const response = await (this.llmProvider as any).generateContentWithSystemPrompt(req);
+      return (async function* () {
+        yield response;
+      })();
+    }
+
+    // Fallback for other providers - implement as a simple wrapper
+    const response = await this.generateContent(req);
+    return (async function* () {
+      yield response;
+    })();
+  }
+
+  async countTokens(req: CountTokensParameters): Promise<CountTokensResponse> {
+    // Simple token estimation - just return a fixed number for now
+    // In a real implementation, this would properly count tokens
+    return { totalTokens: 100 };
+  }
+
+  async embedContent(
+    req: EmbedContentParameters,
+  ): Promise<EmbedContentResponse> {
+    throw new Error('Embedding not supported by LLM provider adapter');
+  }
+}
+
+/**
+ * Factory function to create content generators for different providers
+ */
 export async function createContentGenerator(
-  config: ContentGeneratorConfig,
+  config: Config,
 ): Promise<ContentGenerator> {
-  const version = process.env.CLI_VERSION || process.version;
-  const httpOptions = {
-    headers: {
-      'User-Agent': `GeminiCLI/${version} (${process.platform}; ${process.arch})`,
-    },
-  };
-  if (config.authType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
-    return createCodeAssistContentGenerator(httpOptions, config.authType);
+  const provider = config.getProvider();
+
+  // Debug information
+  console.log('createContentGenerator called with provider:', provider);
+  console.log('Config details:', {
+    provider: config.getProvider(),
+    model: config.getModel(),
+    providers: config.getProviders()
+  });
+
+  switch (provider) {
+    case 'google': {
+      console.log('Creating Google Gemini client');
+      const geminiClient = new GeminiClient(config);
+      return geminiClient.getContentGenerator();
+    }
+    case 'deepseek': {
+      console.log('Creating DeepSeek client');
+      const deepseekClient = new DeepSeekClient(config);
+      return new LLMProviderAdapter(deepseekClient);
+    }
+    default:
+      throw new Error(`Unsupported provider: ${provider}`);
   }
-
-  if (
-    config.authType === AuthType.USE_GEMINI ||
-    config.authType === AuthType.USE_VERTEX_AI
-  ) {
-    const googleGenAI = new GoogleGenAI({
-      apiKey: config.apiKey === '' ? undefined : config.apiKey,
-      vertexai: config.vertexai,
-      httpOptions,
-    });
-
-    return googleGenAI.models;
-  }
-
-  throw new Error(
-    `Error creating contentGenerator: Unsupported authType: ${config.authType}`,
-  );
 }

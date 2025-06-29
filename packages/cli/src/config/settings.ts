@@ -64,6 +64,17 @@ export interface Settings {
   // UI setting. Does not display the ANSI-controlled terminal title.
   hideWindowTitle?: boolean;
 
+  // Provider settings
+  provider?: 'google' | 'deepseek';
+  providers?: {
+    google?: {
+      apiKey?: string;
+    };
+    deepseek?: {
+      apiKey?: string;
+    };
+  };
+
   // Add other settings here.
 }
 

@@ -6,11 +6,8 @@
 
 import * as path from 'node:path';
 import process from 'node:process';
-import {
-  AuthType,
-  ContentGeneratorConfig,
-  createContentGeneratorConfig,
-} from '../core/contentGenerator.js';
+import { AuthType, ContentGeneratorConfig } from '../config/auth.js';
+import { createContentGeneratorConfig } from '../core/contentGenerator.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import { LSTool } from '../tools/ls.js';
 import { ReadFileTool } from '../tools/read-file.js';
@@ -28,6 +25,7 @@ import {
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
 import { GeminiClient } from '../core/client.js';
+import { DeepSeekClient } from '../core/deepseek.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
 import { GitService } from '../services/gitService.js';
 import { getProjectTempDir } from '../utils/paths.js';
@@ -129,6 +127,15 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   extensionContextFilePaths?: string[];
+  provider?: 'google' | 'deepseek';
+  providers?: {
+    google?: {
+      apiKey?: string;
+    };
+    deepseek?: {
+      apiKey?: string;
+    };
+  };
 }
 
 export class Config {
@@ -169,6 +176,17 @@ export class Config {
   private readonly extensionContextFilePaths: string[];
   private modelSwitchedDuringSession: boolean = false;
   flashFallbackHandler?: FlashFallbackHandler;
+  private provider: 'google' | 'deepseek';
+  private readonly providers:
+    | {
+        google?: {
+          apiKey?: string;
+        };
+        deepseek?: {
+          apiKey?: string;
+        };
+      }
+    | undefined;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -190,12 +208,6 @@ export class Config {
     this.approvalMode = params.approvalMode ?? ApprovalMode.DEFAULT;
     this.showMemoryUsage = params.showMemoryUsage ?? false;
     this.accessibility = params.accessibility ?? {};
-    this.telemetrySettings = {
-      enabled: params.telemetry?.enabled ?? false,
-      target: params.telemetry?.target ?? DEFAULT_TELEMETRY_TARGET,
-      otlpEndpoint: params.telemetry?.otlpEndpoint ?? DEFAULT_OTLP_ENDPOINT,
-      logPrompts: params.telemetry?.logPrompts ?? true,
-    };
     this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? true;
 
     this.fileFiltering = {
@@ -210,6 +222,29 @@ export class Config {
     this.bugCommand = params.bugCommand;
     this.model = params.model;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
+    this.provider = params.provider ?? 'google';
+    this.providers = params.providers;
+
+    // Disable telemetry when using DeepSeek provider
+    const telemetryEnabled = this.provider === 'deepseek' ? false : (params.telemetry?.enabled ?? false);
+
+    this.telemetrySettings = {
+      enabled: telemetryEnabled,
+      target: params.telemetry?.target ?? DEFAULT_TELEMETRY_TARGET,
+      otlpEndpoint: params.telemetry?.otlpEndpoint ?? DEFAULT_OTLP_ENDPOINT,
+      logPrompts: params.telemetry?.logPrompts ?? true,
+    };
+
+    // Initialize client based on provider type
+    console.log('Config constructor: Creating client for provider:', this.provider);
+    if (this.provider === 'deepseek') {
+      const deepseekClient = new DeepSeekClient(this);
+      this.geminiClient = deepseekClient as any; // Type assertion for compatibility
+      // Note: initialize() will be called later in refreshAuth()
+    } else {
+      this.geminiClient = new GeminiClient(this);
+      // Note: initialize() will be called later in refreshAuth()
+    }
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -229,6 +264,14 @@ export class Config {
   }
 
   async refreshAuth(authMethod: AuthType) {
+    // Check if this is actually a switch to a different auth method
+    const previousAuthType = this.contentGeneratorConfig?.authType;
+    const _isAuthMethodSwitch =
+      previousAuthType && previousAuthType !== authMethod;
+
+    // Update provider based on auth method
+    this.updateProviderFromAuthType(authMethod);
+
     // Always use the original default model when switching auth methods
     // This ensures users don't stay on Flash after switching between auth types
     // and allows API key users to get proper fallback behavior from getEffectiveModel
@@ -244,10 +287,22 @@ export class Config {
       this,
     );
 
-    const gc = new GeminiClient(this);
-    this.geminiClient = gc;
-    this.toolRegistry = await createToolRegistry(this);
-    await gc.initialize(contentConfig);
+    // Create client based on provider type
+    const provider = this.getProvider();
+    console.log('Creating client for provider:', provider);
+
+    if (provider === 'deepseek') {
+      const deepseekClient = new DeepSeekClient(this);
+      this.geminiClient = deepseekClient as any; // Type assertion for compatibility
+      this.toolRegistry = await createToolRegistry(this);
+      await deepseekClient.initialize(contentConfig);
+    } else {
+      const gc = new GeminiClient(this);
+      this.geminiClient = gc;
+      this.toolRegistry = await createToolRegistry(this);
+      await gc.initialize(contentConfig);
+    }
+
     this.contentGeneratorConfig = contentConfig;
 
     // Reset the session flag since we're explicitly changing auth and using default model
@@ -265,6 +320,10 @@ export class Config {
   }
 
   getModel(): string {
+    // For DeepSeek provider, always return 'deepseek-chat' for UI display
+    if (this.provider === 'deepseek') {
+      return 'deepseek-chat';
+    }
     return this.contentGeneratorConfig?.model || this.model;
   }
 
@@ -378,6 +437,10 @@ export class Config {
   }
 
   getTelemetryEnabled(): boolean {
+    // Always disable telemetry for DeepSeek provider
+    if (this.provider === 'deepseek') {
+      return false;
+    }
     return this.telemetrySettings.enabled ?? false;
   }
 
@@ -437,11 +500,35 @@ export class Config {
   }
 
   getUsageStatisticsEnabled(): boolean {
+    // Always disable usage statistics for DeepSeek provider
+    if (this.provider === 'deepseek') {
+      return false;
+    }
     return this.usageStatisticsEnabled;
   }
 
   getExtensionContextFilePaths(): string[] {
     return this.extensionContextFilePaths;
+  }
+
+  getProvider(): 'google' | 'deepseek' {
+    return this.provider;
+  }
+
+  getProviders() {
+    return this.providers;
+  }
+
+  /**
+   * Update provider based on auth type
+   */
+  private updateProviderFromAuthType(authType: AuthType): void {
+    if (authType === 'deepseek') {
+      this.provider = 'deepseek';
+    } else if (authType === 'api-key' || authType === 'oauth-personal' || authType === 'vertex-ai') {
+      this.provider = 'google';
+    }
+    // For other auth types, keep the current provider
   }
 
   async getGitService(): Promise<GitService> {

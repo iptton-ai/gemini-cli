@@ -128,7 +128,7 @@ I was unable to access the URL directly. Instead, I have fetched the raw content
 ---
 ${textContent}
 ---`;
-      const result = await geminiClient.generateContent(
+      const result = await geminiClient.generateContentFromContent(
         [{ role: 'user', parts: [{ text: fallbackPrompt }] }],
         {},
         signal,
@@ -239,7 +239,7 @@ ${textContent}
     const geminiClient = this.config.getGeminiClient();
 
     try {
-      const response = await geminiClient.generateContent(
+      const response = await geminiClient.generateContentFromContent(
         [{ role: 'user', parts: [{ text: userPrompt }] }],
         { tools: [{ urlContext: {} }] },
         signal, // Pass signal
